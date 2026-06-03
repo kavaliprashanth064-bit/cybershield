@@ -24,18 +24,74 @@ except Exception:
 # =========================
 # WINDOW / DISPLAY
 # =========================
+# Logical game size. Keep the game drawn at 1000x700, then scale it to the real
+# browser/phone screen. This prevents the mobile browser from showing a tiny
+# desktop canvas.
 WIDTH, HEIGHT = 1000, 700
+DISPLAY_W, DISPLAY_H = WIDTH, HEIGHT
 
-# pygame.SCALED helps the same 1000x700 game scale better on different screens.
 DISPLAY_FLAGS = 0
 try:
-    DISPLAY_FLAGS = pygame.SCALED
+    DISPLAY_FLAGS = pygame.SCALED | pygame.RESIZABLE
 except Exception:
     DISPLAY_FLAGS = 0
 
-screen = pygame.display.set_mode((WIDTH, HEIGHT), DISPLAY_FLAGS)
+def get_browser_display_size():
+    """Get the best available browser/canvas size for Pygbag/mobile."""
+    try:
+        info = pygame.display.Info()
+        if info.current_w > 0 and info.current_h > 0:
+            return info.current_w, info.current_h
+    except Exception:
+        pass
+    return WIDTH, HEIGHT
+
+if IS_BROWSER:
+    DISPLAY_W, DISPLAY_H = get_browser_display_size()
+    display_screen = pygame.display.set_mode((DISPLAY_W, DISPLAY_H), DISPLAY_FLAGS)
+    # All game drawing still happens on this virtual screen.
+    screen = pygame.Surface((WIDTH, HEIGHT))
+else:
+    display_screen = pygame.display.set_mode((WIDTH, HEIGHT), DISPLAY_FLAGS)
+    screen = display_screen
+
 pygame.display.set_caption("CyberShield Academy: Teen Digital Defenders")
 clock = pygame.time.Clock()
+
+
+def screen_to_game_pos(pos):
+    """Convert real screen/touch coordinates to the 1000x700 game coordinates."""
+    if not IS_BROWSER:
+        return pos
+
+    x, y = pos
+    game_x = int(x * WIDTH / max(1, DISPLAY_W))
+    game_y = int(y * HEIGHT / max(1, DISPLAY_H))
+    return game_x, game_y
+
+
+def update_display_size(w=None, h=None):
+    """Update browser/mobile canvas size when phone orientation or window changes."""
+    global DISPLAY_W, DISPLAY_H, display_screen
+
+    if not IS_BROWSER:
+        return
+
+    if w is None or h is None:
+        w, h = get_browser_display_size()
+
+    DISPLAY_W = max(1, int(w))
+    DISPLAY_H = max(1, int(h))
+    display_screen = pygame.display.set_mode((DISPLAY_W, DISPLAY_H), DISPLAY_FLAGS)
+
+
+def present_frame():
+    """Show the game. On mobile/browser it stretches to the full device frame."""
+    if IS_BROWSER:
+        scaled_frame = pygame.transform.smoothscale(screen, (DISPLAY_W, DISPLAY_H))
+        display_screen.blit(scaled_frame, (0, 0))
+
+    pygame.display.flip()
 
 # =========================
 # THEME COLOURS
@@ -1253,17 +1309,20 @@ def update_input_from_event(event):
         pygame.quit()
         sys.exit()
 
+    if IS_BROWSER and event.type == pygame.VIDEORESIZE:
+        update_display_size(event.w, event.h)
+
     if event.type == pygame.MOUSEMOTION:
-        pointer_pos = event.pos
+        pointer_pos = screen_to_game_pos(event.pos)
 
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         pointer_pressed = True
         mouse_clicked = True
-        pointer_pos = event.pos
+        pointer_pos = screen_to_game_pos(event.pos)
 
     if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
         pointer_pressed = False
-        pointer_pos = event.pos
+        pointer_pos = screen_to_game_pos(event.pos)
 
     if event.type == pygame.FINGERDOWN:
         pointer_pressed = True
@@ -1306,10 +1365,11 @@ async def main():
     while True:
         mouse_clicked = False
 
-        # Desktop mouse hover support
+        # Desktop mouse hover support. In browser/mobile, convert real screen
+        # coordinates back into the virtual 1000x700 game coordinates.
         if not pointer_pressed:
             try:
-                pointer_pos = pygame.mouse.get_pos()
+                pointer_pos = screen_to_game_pos(pygame.mouse.get_pos())
             except Exception:
                 pass
 
@@ -1340,7 +1400,7 @@ async def main():
         elif game_state == "end":
             game_state = end_screen()
 
-        pygame.display.update()
+        present_frame()
         clock.tick(60)
 
         # Required for Pygbag/mobile browser. Also works on desktop.
